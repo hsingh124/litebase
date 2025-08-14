@@ -2,12 +2,14 @@ package ipc
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"litebase-backend/internal/logger"
 	"litebase-backend/internal/protocol"
@@ -28,9 +30,12 @@ type Server struct {
 
 // Config holds the server configuration
 type Config struct {
-	SocketPath string
-	PipeName   string
-	Logger     logger.Logger
+	SocketPath   string
+	PipeName     string
+	Logger       logger.Logger
+	DebugMode    bool // Enable debug mode (longer timeouts, no connection deadlines)
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
 }
 
 // MessageHandler is a function that handles incoming messages
@@ -40,6 +45,14 @@ type MessageHandler func(*protocol.Message) (*protocol.Message, error)
 func New(config *Config) (*Server, error) {
 	if config.Logger == nil {
 		return nil, fmt.Errorf("logger is required")
+	}
+
+	// Set default timeouts if not specified
+	if config.ReadTimeout == 0 {
+		config.ReadTimeout = 30 * time.Second
+	}
+	if config.WriteTimeout == 0 {
+		config.WriteTimeout = 30 * time.Second
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -91,7 +104,13 @@ func (s *Server) Start() error {
 			}
 		}
 
-		go s.handleConnection(conn)
+		go func() {
+			// Set connection deadline only if not in debug mode
+			if !s.config.DebugMode {
+				conn.SetDeadline(time.Now().Add(s.config.ReadTimeout))
+			}
+			s.handleConnection(conn)
+		}()
 	}
 }
 
@@ -194,20 +213,22 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 // readMessage reads a MessagePack message from the connection
 func (s *Server) readMessage(conn net.Conn) (*protocol.Message, error) {
+	// Set read deadline if not in debug mode
+	if !s.config.DebugMode {
+		conn.SetReadDeadline(time.Now().Add(s.config.ReadTimeout))
+	}
+
 	// Read length prefix (4 bytes)
 	lengthBytes := make([]byte, 4)
-	if _, err := conn.Read(lengthBytes); err != nil {
+	if _, err := io.ReadFull(conn, lengthBytes); err != nil {
 		return nil, fmt.Errorf("failed to read message length: %w", err)
 	}
 
-	length := uint32(lengthBytes[0])<<24 |
-		uint32(lengthBytes[1])<<16 |
-		uint32(lengthBytes[2])<<8 |
-		uint32(lengthBytes[3])
+	length := binary.BigEndian.Uint32(lengthBytes)
 
 	// Read message data
 	data := make([]byte, length)
-	if _, err := conn.Read(data); err != nil {
+	if _, err := io.ReadFull(conn, data); err != nil {
 		return nil, fmt.Errorf("failed to read message data: %w", err)
 	}
 
@@ -222,6 +243,11 @@ func (s *Server) readMessage(conn net.Conn) (*protocol.Message, error) {
 
 // writeMessage writes a MessagePack message to the connection
 func (s *Server) writeMessage(conn net.Conn, msg interface{}) error {
+	// Set write deadline if not in debug mode
+	if !s.config.DebugMode {
+		conn.SetWriteDeadline(time.Now().Add(s.config.WriteTimeout))
+	}
+
 	// Serialize message
 	data, err := msgpack.Marshal(msg)
 	if err != nil {
@@ -229,13 +255,8 @@ func (s *Server) writeMessage(conn net.Conn, msg interface{}) error {
 	}
 
 	// Write length prefix
-	length := uint32(len(data))
-	lengthBytes := []byte{
-		byte(length >> 24),
-		byte(length >> 16),
-		byte(length >> 8),
-		byte(length),
-	}
+	lengthBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(lengthBytes, uint32(len(data)))
 
 	if _, err := conn.Write(lengthBytes); err != nil {
 		return fmt.Errorf("failed to write message length: %w", err)

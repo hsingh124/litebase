@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -36,12 +38,8 @@ func main() {
 		}
 		fmt.Printf("Connected to TCP server on port %d\n", *port)
 	} else if *pipeName != "" {
-		// Windows named pipe
-		conn, err = net.Dial("tcp", fmt.Sprintf("localhost:8080"))
-		if err != nil {
-			log.Fatalf("Failed to connect to named pipe: %v", err)
-		}
-		fmt.Printf("Connected to named pipe: %s\n", *pipeName)
+		// Windows named pipe - this is a placeholder, actual implementation would use Windows-specific APIs
+		log.Fatalf("Windows named pipe support not implemented yet")
 	} else {
 		// Unix domain socket
 		conn, err = net.Dial("unix", *socketPath)
@@ -156,13 +154,8 @@ func writeMessage(conn net.Conn, msg *protocol.Message) error {
 	}
 
 	// Write length prefix
-	length := uint32(len(data))
-	lengthBytes := []byte{
-		byte(length >> 24),
-		byte(length >> 16),
-		byte(length >> 8),
-		byte(length),
-	}
+	lengthBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(lengthBytes, uint32(len(data)))
 
 	if _, err := conn.Write(lengthBytes); err != nil {
 		return fmt.Errorf("failed to write message length: %v", err)
@@ -179,18 +172,15 @@ func writeMessage(conn net.Conn, msg *protocol.Message) error {
 func readMessage(conn net.Conn) (*protocol.Message, error) {
 	// Read length prefix
 	lengthBytes := make([]byte, 4)
-	if _, err := conn.Read(lengthBytes); err != nil {
+	if _, err := io.ReadFull(conn, lengthBytes); err != nil {
 		return nil, fmt.Errorf("failed to read message length: %v", err)
 	}
 
-	length := uint32(lengthBytes[0])<<24 |
-		uint32(lengthBytes[1])<<16 |
-		uint32(lengthBytes[2])<<8 |
-		uint32(lengthBytes[3])
+	length := binary.BigEndian.Uint32(lengthBytes)
 
 	// Read message data
 	data := make([]byte, length)
-	if _, err := conn.Read(data); err != nil {
+	if _, err := io.ReadFull(conn, data); err != nil {
 		return nil, fmt.Errorf("failed to read message data: %v", err)
 	}
 

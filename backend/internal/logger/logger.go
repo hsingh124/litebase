@@ -1,6 +1,8 @@
 package logger
 
 import (
+	"fmt"
+
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -54,6 +56,8 @@ func New(level string) Logger {
 	if err != nil {
 		// Fallback to basic logger if production config fails
 		zapLogger = zap.NewExample()
+		// Log the error for debugging
+		fmt.Printf("Failed to create production logger: %v, using fallback\n", err)
 	}
 
 	return &logger{zap: zapLogger}

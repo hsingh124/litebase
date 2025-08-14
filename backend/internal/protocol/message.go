@@ -90,7 +90,8 @@ func NewErrorResponse(err error, code int, details string) *ErrorResponse {
 	}
 }
 
-// generateID generates a simple unique ID for messages
+// generateID generates a unique ID for messages
 func generateID() string {
+	// Use nanosecond precision for better uniqueness
 	return time.Now().Format("20060102150405.000000000")
 }
