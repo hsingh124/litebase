@@ -194,16 +194,59 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 // readMessage reads a MessagePack message from the connection
 func (s *Server) readMessage(conn net.Conn) (*protocol.Message, error) {
-	decoder := msgpack.NewDecoder(conn)
+	// Read length prefix (4 bytes)
+	lengthBytes := make([]byte, 4)
+	if _, err := conn.Read(lengthBytes); err != nil {
+		return nil, fmt.Errorf("failed to read message length: %w", err)
+	}
+
+	length := uint32(lengthBytes[0])<<24 |
+		uint32(lengthBytes[1])<<16 |
+		uint32(lengthBytes[2])<<8 |
+		uint32(lengthBytes[3])
+
+	// Read message data
+	data := make([]byte, length)
+	if _, err := conn.Read(data); err != nil {
+		return nil, fmt.Errorf("failed to read message data: %w", err)
+	}
+
+	// Deserialize message
 	var msg protocol.Message
-	err := decoder.Decode(&msg)
-	return &msg, err
+	if err := msgpack.Unmarshal(data, &msg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal message: %w", err)
+	}
+
+	return &msg, nil
 }
 
 // writeMessage writes a MessagePack message to the connection
 func (s *Server) writeMessage(conn net.Conn, msg interface{}) error {
-	encoder := msgpack.NewEncoder(conn)
-	return encoder.Encode(msg)
+	// Serialize message
+	data, err := msgpack.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal message: %w", err)
+	}
+
+	// Write length prefix
+	length := uint32(len(data))
+	lengthBytes := []byte{
+		byte(length >> 24),
+		byte(length >> 16),
+		byte(length >> 8),
+		byte(length),
+	}
+
+	if _, err := conn.Write(lengthBytes); err != nil {
+		return fmt.Errorf("failed to write message length: %w", err)
+	}
+
+	// Write message data
+	if _, err := conn.Write(data); err != nil {
+		return fmt.Errorf("failed to write message data: %w", err)
+	}
+
+	return nil
 }
 
 // handleMessage routes messages to appropriate handlers
