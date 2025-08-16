@@ -14,6 +14,7 @@ type Config struct {
 	PipeName   string
 	Port       int
 	Logger     logger.Logger
+	DebugMode  bool // Enable debug mode for IPC server
 }
 
 // Server represents the main server
@@ -34,6 +35,7 @@ func New(config *Config) (*Server, error) {
 		SocketPath: config.SocketPath,
 		PipeName:   config.PipeName,
 		Logger:     config.Logger,
+		DebugMode:  config.DebugMode,
 	}
 
 	ipcServer, err := ipc.New(ipcConfig)

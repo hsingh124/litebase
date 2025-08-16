@@ -41,6 +41,7 @@ func main() {
 		PipeName:   *pipeName,
 		Port:       *port,
 		Logger:     logger,
+		DebugMode:  *logLevel == "debug",
 	}
 
 	// Create and start server
@@ -50,17 +51,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Wait for interrupt signal to gracefully shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
 	// Start server in background
 	go func() {
 		if err := srv.Start(); err != nil {
 			logger.Error("Server failed to start", zap.Error(err))
-			os.Exit(1)
+			// Don't exit immediately, allow graceful shutdown
+			quit <- syscall.SIGTERM
 		}
 	}()
 
-	// Wait for interrupt signal to gracefully shutdown
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	logger.Info("Shutting down server...")
